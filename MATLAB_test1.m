@@ -1,124 +1,139 @@
-% Install Robotics Toolbox if needed (uncomment to install)
-% matlab.addons.install('rtb.zip'); % Use appropriate path to the toolbox
+% Clear workspace and initialize
+clc;
+clear;
+close all;
 
-% Load the UR3 robot model
-ur3 = loadrobot('universalUR3', 'DataFormat', 'column');
+% Load the UR3 robot model from Peter Corke's Robotics Toolbox
+%% ur3 = loadrobot('universalUR3', 'DataFormat', 'column', 'Gravity', [0, 0, -9.81]);
 
-% Initialize camera parameters
-focal_length = 800; % in pixels (example value)
-principal_point = [320, 240]; % Assuming 640x480 resolution
+ur3 = UR3;
 
-% Create a camera model (monocular pinhole camera)
+% Define camera parameters for simulation
+focal_length = 800; 
+principal_point = [320, 240]; % Image center
+resolution = [640, 480]; % Image resolution
+
+% Create a monocular pinhole camera model in the Robotics Toolbox
 cam = CentralCamera('focal', focal_length, ...
                     'pixel', 10e-6, ...
-                    'resolution', [640, 480], ...
-                    'centre', principal_point);
+                    'resolution', resolution, ...
+                    'centre', principal_point, ...
+                    'name', 'Simulation Camera');
 
-% Load the patterns (e.g., QR codes or AprilTags)
-pattern1 = imread('pattern1.png');
-pattern2 = imread('pattern2.png');
+% Set initial camera pose (position and orientation in SE(3))
+Tc0 = transl(0.5, 0, 0.5) * trotx(pi); % Positioned above and looking down
 
-% Initialize feature detector and matcher
-featureDetector = detectSURFFeatures(pattern1);
-[features1, validPoints1] = extractFeatures(pattern1, featureDetector);
-
-% Start live camera feed (for manual use first)
-cameraObj = webcam(); % Ensure your camera is connected
-
-% Capture an image and detect features from live feed
-frame = snapshot(cameraObj);
-grayFrame = rgb2gray(frame);
-featureDetector = detectSURFFeatures(grayFrame);
-[featuresFrame, validPointsFrame] = extractFeatures(grayFrame, featureDetector);
-
-% Match the features between the live frame and pattern
-indexPairs = matchFeatures(features1, featuresFrame);
-matchedPoints1 = validPoints1(indexPairs(:, 1));
-matchedPointsFrame = validPointsFrame(indexPairs(:, 2));
-
-% Display matched features (for visualization)
+% Visualize the camera and UR3 model in 3D space
 figure;
-showMatchedFeatures(pattern1, grayFrame, matchedPoints1, matchedPointsFrame, 'montage');
+hold on;
+cam.plot_camera('Tcam', Tc0); % Plot the camera in its initial pose
+view(3); axis equal; grid on;
+title('UR3 Robot with Simulated Camera');
+show(ur3, homeConfiguration(ur3));
 
-% Define two desired 2D image points (e.g., from the two patterns)
-p_star1 = [320, 240]; % Desired position for pattern 1
-p_star2 = [400, 300]; % Desired position for pattern 2
+% Simulate two feature points in the world (in 3D space)
+P1 = [0.2; 0.2; 0];  % 3D coordinates of feature 1 in world frame
+P2 = [0.2; -0.2; 0]; % 3D coordinates of feature 2 in world frame
 
-% Real-time tracking loop
-while true
-    frame = snapshot(cameraObj); % Capture current frame
-    grayFrame = rgb2gray(frame);
-    [featuresFrame, validPointsFrame] = extractFeatures(grayFrame, featureDetector);
+% Project the 3D points into the camera's 2D image plane
+p1 = cam.plot(P1, 'Tcam', Tc0, 'label', 'P1'); % Initial 2D projection of P1
+p2 = cam.plot(P2, 'Tcam', Tc0, 'label', 'P2'); % Initial 2D projection of P2
+
+% Define desired 2D positions in the image plane (target positions)
+p_star1 = [320, 240]; % Desired pixel location for pattern 1
+p_star2 = [400, 300]; % Desired pixel location for pattern 2
+
+% Define control gain
+lambda = 0.01; 
+
+% Set simulation parameters
+max_iterations = 100; % Maximum iterations for control loop
+threshold = 5; % Error threshold for convergence
+
+% Initialize the camera pose for the control loop
+Tc = Tc0;
+
+for k = 1:max_iterations
+    % Project the 3D points into the current image plane
+    p1 = cam.project(P1, 'Tcam', Tc); 
+    p2 = cam.project(P2, 'Tcam', Tc);
     
-    % Match features
-    indexPairs = matchFeatures(features1, featuresFrame);
-    matchedPointsFrame = validPointsFrame(indexPairs(:, 2));
-    
-    % Get the current 2D positions
-    p1 = matchedPointsFrame.Location(1, :); % Current position of pattern 1
-    p2 = matchedPointsFrame.Location(2, :); % Current position of pattern 2
-    
-    % Compute error (difference between desired and current positions)
+    % Compute the 2D error between current and desired positions
     error1 = p_star1 - p1;
     error2 = p_star2 - p2;
-    
-    % Interaction matrix (Jacobian-like matrix for image-based visual servoing)
-    L = [-1, 0, p1(1); 
-          0, -1, p1(2)]; 
+    error = [error1'; error2']; % Combine errors into one vector
 
-    % Control law: v = lambda * pinv(L) * error
-    lambda = 0.01; % Gain factor
-    v = lambda * pinv(L) * [error1'; error2']; % Control velocity
+    % Display current error
+    disp(['Iteration ', num2str(k), ': Error = ', num2str(norm(error))]);
 
-    % Display real-time error for visualization
-    disp(['Error1: ', num2str(error1), '  Error2: ', num2str(error2)]);
-
-    % (Optional) Break the loop if error is small enough
-    if norm(error1) < 5 && norm(error2) < 5
+    % Check if the error is below the threshold
+    if norm(error) < threshold
         disp('Target reached!');
         break;
     end
+
+    % Compute the interaction matrix for the two points
+    L1 = cam.visjac_p(p1, 1); % Interaction matrix for pattern 1
+    L2 = cam.visjac_p(p2, 1); % Interaction matrix for pattern 2
+
+    % Combine the interaction matrices
+    L = [L1; L2]; 
+
+    % Compute the control velocity (camera twist)
+    v = lambda * pinv(L) * error;
+
+    % Update the camera pose using the computed velocity
+    Tc = Tc * se3(v * 0.1); % Apply velocity with a small time step
+
+    % Update visualization
+    cam.plot_camera('Tcam', Tc); 
+    drawnow;
 end
 
-% Define the initial joint configuration of the UR3
-q_init = homeConfiguration(ur3);
+disp('Simulation completed.');
 
-% Set up the robot's IK solver
+% Initialize the robot's joint configuration
+q = homeConfiguration(ur3); % Start from the home position
+
+% Set the IK solver for the UR3
 ik = inverseKinematics('RigidBodyTree', ur3);
-weights = [0 0 0 1 1 1]; % Weights for the IK solver
-endEffector = 'tool0'; % Name of the UR3 end-effector
+weights = [0, 0, 0, 1, 1, 1]; % Weights for IK solution
+endEffector = 'tool0'; % UR3 end-effector
 
-% Real-time control loop for the UR3 with visual servoing
-q = q_init; % Start with the initial configuration
+for k = 1:max_iterations
+    % Project the 3D points into the current image plane
+    p1 = cam.project(P1, 'Tcam', Tc); 
+    p2 = cam.project(P2, 'Tcam', Tc);
 
-while true
-    % Capture current frame and compute error (as in previous step)
-    frame = snapshot(cameraObj);
-    grayFrame = rgb2gray(frame);
-    [featuresFrame, validPointsFrame] = extractFeatures(grayFrame, featureDetector);
-    indexPairs = matchFeatures(features1, featuresFrame);
-    matchedPointsFrame = validPointsFrame(indexPairs(:, 2));
-    p1 = matchedPointsFrame.Location(1, :);
+    % Compute the 2D error between current and desired positions
     error1 = p_star1 - p1;
+    error2 = p_star2 - p2;
+    error = [error1'; error2'];
 
-    % Compute camera velocity using interaction matrix
-    v = lambda * pinv(L) * error1'; 
+    % Check if the error is below the threshold
+    if norm(error) < threshold
+        disp('Target reached!');
+        break;
+    end
 
-    % Convert camera velocity to joint velocity using Jacobian
+    % Compute the interaction matrix and control velocity
+    L1 = cam.visjac_p(p1, 1);
+    L2 = cam.visjac_p(p2, 1);
+    L = [L1; L2];
+    v = lambda * pinv(L) * error;
+
+    % Compute the robot's Jacobian and joint velocities
     J = geometricJacobian(ur3, q, endEffector);
     q_dot = pinv(J) * v;
 
-    % Update joint angles using Euler integration
+    % Update the robot's joint configuration
     dt = 0.1; % Time step
     q = q + q_dot * dt;
 
-    % Apply new joint angles to the UR3 model
+    % Visualize the updated robot configuration
     show(ur3, q, 'PreservePlot', false);
+    cam.plot_camera('Tcam', Tc); 
     drawnow;
-
-    % Check if the target is reached
-    if norm(error1) < 5
-        disp('Target reached by UR3!');
-        break;
-    end
 end
+
+disp('Robot control simulation completed.');
