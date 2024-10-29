@@ -1,0 +1,26 @@
+clc;
+close all;
+clear all;
+
+%% Function for loading in Environment + Ur3
+
+    % load in table
+    Table = PlaceObject('counter.ply');
+    Table_vertices = get(Table,'Vertices');
+    transformedVerticesT = [0.5*Table_vertices,ones(size(Table_vertices,1),1)]*troty(-pi/2)'*transl(0,0,0)';
+    set(Table,'Vertices',transformedVerticesT(:,1:3));
+ 
+    % loading UR3
+    robot = UR3(transl(0,0,0.75));
+
+    % Set limits for axis
+    xlim([-1.5, 1.5]) 
+    ylim([-1.5, 1.5]) 
+    zlim([0, 2])  
+
+    axis equal
+    grid on
+    view(3)
+    
+
+%% Test Function which moves 
