@@ -1,175 +1,142 @@
 clc;
-close all;
 clear;
+close all;
 
-%% Function for loading in Environment + UR3
-
-% Square Pattern
-% patternImage = imread('SquarePatternTrace.png'); % Load the pattern image
-% Triangle Pattern
-patternImage = imread('TriangleTrace.png'); % Load the pattern image
-% Composite Shape
-% patternImage = imread('squarepattern1.png'); % Load the pattern image
-
-
-% Display the wall with the pattern texture in the workspace
-figure;
-hold on;
-wall = surf([-1.5,1.5;-1.5,1.5],[1.5,1.5;1.5,1.5],[0,0;2,2],'CData',patternImage,'FaceColor','texturemap');
-
-% Harris corner detection on the pattern
+%% Load and process the pattern image
+patternImage = imread('CompoundShape.png'); % Load the pattern image (use your specific image here)
 grayImage = rgb2gray(patternImage); % Convert to grayscale
-corners = detectHarrisFeatures(grayImage); % Detect Harris corners
-cornerPoints = corners.selectStrongest(20).Location; % Select the 20 strongest corners
 
-% Load the table
-Table = PlaceObject('counter.ply');
-Table_vertices = get(Table, 'Vertices');
-transformedVerticesT = [0.5 * Table_vertices, ones(size(Table_vertices,1),1)] * troty(-pi/2)' * transl(0,0,0)';
-set(Table, 'Vertices', transformedVerticesT(:, 1:3));
+% Apply Gaussian blur to reduce noise
+blurredImage = imgaussfilt(grayImage, 2); % Adjust sigma for smoothness
 
-% Load UR3
-robot = UR3(transl(0,0,0.75));
+% Harris corner detection to find key points
+corners = detectHarrisFeatures(blurredImage);
+cornerPoints = corners.Location; % Extract corner coordinates
 
-% Set axis limits
+% Order the corner points for tracing
+centroid = mean(cornerPoints, 1);
+angles = atan2(cornerPoints(:,2) - centroid(2), cornerPoints(:,1) - centroid(1));
+[~, sortIdx] = sort(angles);
+orderedCornerPoints = cornerPoints(sortIdx, :);
+
+% Display the ordered points on the image for verification
+figure;
+imshow(blurredImage);
+hold on;
+plot(orderedCornerPoints(:,1), orderedCornerPoints(:,2), 'r*-');
+title('Ordered Detected Corners');
+
+% Convert ordered corner points to workspace coordinates
+imageSize = size(grayImage);
+workspaceX = linspace(-0.5, 0.5, imageSize(2)); % Adjust based on workspace size
+workspaceY = 1; % Keep Y constant in workspace
+workspaceZ = linspace(0.2, 0.8, imageSize(1)); % Adjust based on workspace height
+wallY = 1; % This is the Y position on which the wall pattern is located
+
+workspacePoints = [workspaceX(round(orderedCornerPoints(:,1)))', ...
+                   repmat(wallY, length(orderedCornerPoints), 1), ...
+                   workspaceZ(round(imageSize(1) - orderedCornerPoints(:,2) + 1))'];
+workspacePoints(:,3) = workspacePoints(:,3) + 0.5; % Adjust the offset as needed
+
+
+% Append the first point to the end to close the shape
+workspacePoints = [workspacePoints; workspacePoints(1, :)];
+
+%% Set up the environment with table and UR3
+figure; % Open a new figure for the 3D environment
+hold on;
 xlim([-1.5, 1.5]);
 ylim([-1.5, 1.5]);
 zlim([0, 2]);
-
 axis equal;
 grid on;
 view(3);
 
-%% Map Corners to Wall in Workspace Coordinates
+% Load in the table
+Table = PlaceObject('counter.ply');
+Table_vertices = get(Table, 'Vertices');
+transformedVerticesT = [0.5 * Table_vertices, ones(size(Table_vertices, 1), 1)] * troty(-pi/2)' * transl(0, 0, 0)';
+set(Table, 'Vertices', transformedVerticesT(:, 1:3));
 
-% Define the scaling factors and offsets to map image to workspace
-imageSize = size(grayImage);
-workspaceX = linspace(-1.5, 1.5, imageSize(2)); % Scale x-coordinates
-workspaceY = linspace(0, 2, imageSize(1)); % Scale z-coordinates
-wallPointsWorkspace = [workspaceX(round(cornerPoints(:,1)))', repmat(1.5, size(cornerPoints,1), 1), workspaceY(round(cornerPoints(:,2)))']; % Map to wall in workspace
+% Load the UR3 robot
+robot = UR3(transl(0, 0, 0.75));
 
-%% Move UR3 to Follow Detected Corner Points
+% Initialize trace for visualization in 3D plot
+traceHandle = plot3(NaN, NaN, NaN, 'r', 'LineWidth', 1.5);
 
-% Define end-effector orientation (pointing at the wall)
-targetOri = trotx(-pi/2) * troty(pi/2) * trotz(0);
+% Set up 2D figure for end-effector path
+figure; % New figure for the 2D plot
+endEffectorPathHandle = plot(NaN, NaN, 'b', 'LineWidth', 1.5);
+xlabel('X Position (m)');
+ylabel('Z Position (m)');
+title('End-Effector Path (X-Z Plane)');
+grid on;
+hold on;
 
-% Loop over each detected corner point
-for i = 1:size(wallPointsWorkspace, 1)
-    targetPoint = wallPointsWorkspace(i, :);
+% Define end-effector orientation for tracing (pointing down)
+targetOri = trotx(-pi/2) * troty(pi/2);
+
+% Move UR3 to each detected corner, maintaining the constant Y position
+tracePoints = []; % Store the path for continuous line update in 3D
+xzPathPoints = []; % Store end-effector (x, z) coordinates for the 2D plot
+
+for i = 1:size(workspacePoints, 1)
+    targetPoint = workspacePoints(i, :);
+    
+    % Override the Y-coordinate to maintain a fixed position
+    targetPoint(2) = wallY;
+    
     moveUR3ToPoint(robot, targetPoint, targetOri);
-    pause(0.5); % Pause to visualize movement
+    
+    % Append the current target position to the trace
+    tracePoints = [tracePoints; targetPoint];
+    xzPathPoints = [xzPathPoints; targetPoint(1), targetPoint(3)]; % Only X-Z for 2D plot
+    
+    % Update the 3D trace on the plot
+    set(traceHandle, 'XData', tracePoints(:,1), 'YData', tracePoints(:,2), 'ZData', tracePoints(:,3));
+    
+    % Update the 2D end-effector path on the X-Z plane
+    set(endEffectorPathHandle, 'XData', xzPathPoints(:,1), 'YData', xzPathPoints(:,2));
+    
+    pause(0.05); % Adjust for speed of tracing
 end
 
-%% Local Functions
+%% Function Definitions
 
 function moveUR3ToPoint(robot, targetPoint, targetOri)
-    % moveUR3ToPoint - Moves the UR3 robot to a specific point in workspace
-    % Inputs:
-    %   robot - The UR3 robot object
-    %   targetPoint - A 3-element vector [x, y, z] representing the target coordinates
-    %   targetOri - Orientation matrix for the end-effector
-    
-    % Generate the joint configurations to reach the target using FindqMatrix logic
+    % Move UR3 robot to a specific point with specified orientation
     [matrixSignal, qMatrix] = FindqMatrix(robot, targetPoint, targetOri);
     if matrixSignal
-        % Run the movement using a controlled animation
-        run(robot, qMatrix);
+        run(robot, qMatrix); % Run movement if a valid path is found
     else
-        disp('Unable to find a valid path to the target position.');
+        disp('Failed to find a valid path for tracing.');
     end
 end
 
 function [result, qMatrix] = FindqMatrix(robot, targetPos, targetOri)
-    % This function calculates the joint configurations to reach a target
+    % Calculate joint configurations to reach the target position
     qMatrix = [];
-    cur_object = targetPos;
-    cur_pos = robot.model.fkine(robot.model.getpos).T;
+    Q_destination = SE3(transl(targetPos) * targetOri);
+    initialGuess = robot.model.getpos();
+
+    % Set options for inverse kinematics with relaxed constraints
+    ikine_options = {'tol', 1e-4, 'lambda', 0.5, 'lambdamin', 0.01, 'ilimit', 1000, 'forceSoln', true, 'mask', [1 1 1 0 0 0]};
     
-    % Ensure `cur_pos` is a valid transformation
-    if (cur_pos(3,4) - 1.5) < 0.2
-        cur_pos(3,4) = cur_pos(3,4) + 0.2;
-    end
-    
-    % Create the destination transformations
-    Q_destination{2} = SE3(cur_pos);  % Current pose, adjusted height if needed
-    Q_destination{3} = SE3(transl(cur_object + [0, 0, 0.3])) * SE3(targetOri); % Move above target
-    Q_destination{4} = SE3(transl(cur_object)) * SE3(targetOri); % Approach target directly
-    
-    % Initial joint configuration guesses
-    Q{1} = robot.model.getpos();
-    Q{2} = [];
-    Q{3} = [];
-    Q{4} = [];
-    
-    % Use previous configuration as an initial guess for subsequent steps
-    initialGuess = Q{1};
-    
-    % Define ikine options with force solution
-    ikine_options = {
-        'tol', 1e-4, ...
-        'lambda', 0.5, ...
-        'lambdamin', 0.01, ...
-        'ilimit', 1000, ...
-        'forceSoln', true, ...
-        'mask', [1 1 1 0 0 0]
-    };
-    
-    for pt = 2:4
-        count = 1;
-        
-        while count <= 1000  % Limit iterations for stability
-            % Attempt to calculate the inverse kinematics with adjusted options
-            Q{pt} = robot.model.ikine(Q_destination{pt}.T, 'q0', initialGuess, ikine_options{:});
-            
-            if ~isempty(Q{pt})
-                result = 1;
-                % Generate smooth trajectory between configurations
-                qMatrix = [qMatrix; jtraj(Q{pt-1}, Q{pt}, 100)];
-                initialGuess = Q{pt}; % Update the initial guess for the next iteration
-                break;
-            else
-                result = 0;
-                count = count + 1;
-            end
-        end
-        if ~result
-            disp('Failed to generate a path to target.');
-            break;
-        end
+    Q = robot.model.ikine(Q_destination.T, 'q0', initialGuess, ikine_options{:});
+    if ~isempty(Q)
+        result = 1;
+        qMatrix = jtraj(initialGuess, Q, 50); % Generate smooth trajectory
+    else
+        result = 0;
     end
 end
 
 function run(robot, qMatrix)
-    % Main function to run the robot through the qMatrix and plot a trace
-    % Initialize trace points and plot handle
-    tracePoints = []; % Array to store end-effector positions
-    traceHandle = plot3(NaN, NaN, NaN, 'r', 'LineWidth', 1.5); % Initialize the line object
-    
+    % Run the UR3 through the calculated joint trajectory and plot a trace
     if ~isempty(qMatrix)
         for i = 1:size(qMatrix, 1)
-            % Animate the robot
-            robot.model.animate(qMatrix(i,:));
-            
-            % Get the current end-effector position
-            endEffectorPose = robot.model.fkine(qMatrix(i,:));
-            
-            if ~isempty(endEffectorPose) && size(endEffectorPose,1) == 4
-                % Extract the (x, y, z) position of the end-effector
-                endEffectorPosition = endEffectorPose(1:3, 4)';
-                
-                % Append the new position to tracePoints
-                tracePoints = [tracePoints; endEffectorPosition];
-                
-                % Update the line object data to reflect the trace
-                set(traceHandle, 'XData', tracePoints(:,1), 'YData', tracePoints(:,2), 'ZData', tracePoints(:,3));
-            end
-            
+            robot.model.animate(qMatrix(i, :));
             drawnow;
         end
-    else
-        disp('qMatrix is empty, no movement to execute.');
     end
 end
-
-
-
