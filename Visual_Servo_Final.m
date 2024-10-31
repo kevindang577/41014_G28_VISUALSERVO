@@ -1,8 +1,6 @@
 % Clear workspace and command window
 clear; clc;
 
-% Add path to the RealSense MATLAB wrappers
-addpath('C:\Users\kevin\Documents\Intel RealSense SDK 2.0\matlab');
 
 % Declare global variables
 global img pointTracker pointsInitialized userSelectedPoints selectionMode cameraAxes selectedCentroid
@@ -75,20 +73,24 @@ pointTracker = vision.PointTracker('MaxBidirectionalError', 2);
 % --- GUI Controls ---
 
 % Button for Selection Mode (3 Corners)
-btn3Corners = uicontrol('Parent', controlPanel, 'Style', 'pushbutton', 'String', 'Selection Mode (3 Corners)', ...
+btn3Corners = uicontrol('Parent', controlPanel, 'Style', 'pushbutton', 'String', 'Select (Triangle)', ...
     'Units', 'normalized', 'Position', [0.1 0.8 0.8 0.1], 'Callback', @btn3CornersCallback, 'FontSize', 12);
 
 % Button for Selection Mode (4 Corners)
-btn4Corners = uicontrol('Parent', controlPanel, 'Style', 'pushbutton', 'String', 'Selection Mode (4 Corners)', ...
+btn4Corners = uicontrol('Parent', controlPanel, 'Style', 'pushbutton', 'String', 'Select (Square)', ...
     'Units', 'normalized', 'Position', [0.1 0.65 0.8 0.1], 'Callback', @btn4CornersCallback, 'FontSize', 12);
+
+% Button to show simulation
+btnSimulation = uicontrol('Parent', controlPanel, 'Style', 'pushbutton', 'String', 'Open UR3 Simulation', ...
+    'Units', 'normalized', 'Position', [0.1 0.5 0.8 0.1], 'Callback', @btnSimulation, 'FontSize', 12);
 
 % Button to Exit Selection Mode
 btnExitSelection = uicontrol('Parent', controlPanel, 'Style', 'pushbutton', 'String', 'Exit Selection Mode', ...
-    'Units', 'normalized', 'Position', [0.1 0.5 0.8 0.1], 'Callback', @btnExitSelectionCallback, 'FontSize', 12);
+    'Units', 'normalized', 'Position', [0.1 0.35 0.8 0.1], 'Callback', @btnExitSelectionCallback, 'FontSize', 12);
 
 % Button to Exit Program
 btnExitProgram = uicontrol('Parent', controlPanel, 'Style', 'pushbutton', 'String', 'Exit Program', ...
-    'Units', 'normalized', 'Position', [0.1 0.35 0.8 0.1], 'Callback', @btnExitProgramCallback, 'FontSize', 12);
+    'Units', 'normalized', 'Position', [0.1 0.2 0.8 0.1], 'Callback', @btnExitProgramCallback, 'FontSize', 12);
 
 % --- Main Loop ---
 

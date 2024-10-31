@@ -3,7 +3,7 @@ clear;
 close all;
 
 %% Load and process the pattern image
-patternImage = imread('CompoundShape.png'); % Load the pattern image (use your specific image here)
+patternImage = imread('TriangleTrace.png'); % Load the pattern image (use your specific image here)
 grayImage = rgb2gray(patternImage); % Convert to grayscale
 
 % Apply Gaussian blur to reduce noise
