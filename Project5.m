@@ -3,7 +3,7 @@ clear;
 close all;
 
 % Load and process the pattern image
-patternImage = imread('TriangleTrace2.png'); % Load the pattern image
+patternImage = imread('1_Color.png'); % Load the pattern image
 grayImage = rgb2gray(patternImage); % Convert to grayscale
 
 % Apply Gaussian blurring to reduce noise and edge pixelation effects
