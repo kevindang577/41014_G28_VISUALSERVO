@@ -232,7 +232,7 @@ function btnSimulationCallback(~, ~)
     % Set up axes for UR3 simulation
     ur3Axes = axes('Parent', simFigure, 'Units', 'normalized', 'Position', [0.05, 0.05, 0.9, 0.9]);
     hold(ur3Axes, 'on');
-    axis(ur3Axes, [-1 1 -1 1 0 1]);
+    axis(ur3Axes, [-1.5 1.5 -1.5 1.5 0 1.5]);
     xlabel(ur3Axes, 'X');
     ylabel(ur3Axes, 'Y');
     zlabel(ur3Axes, 'Z');

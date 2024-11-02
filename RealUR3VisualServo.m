@@ -3,7 +3,21 @@ clear; clc;
 
 % Declare global variables
 global img pointTracker pointsInitialized userSelectedPoints selectionMode cameraAxes selectedCentroid
-global moveX moveY moveZ ur3Robot ur3Axes % Added global variables for UR3 movement
+global moveX moveY moveZ % Variables for movement commands
+
+% Add required paths
+% Add path to the RealSense MATLAB wrappers
+addpath('C:\Users\Kevin\Documents\Intel RealSense SDK 2.0\matlab');
+
+% Add path to your camera calibration parameters
+% Ensure 'cameraParams.mat' is in the current directory or provide the full path
+
+% Initialize ROS connection
+rosshutdown; % Shutdown any existing ROS connections
+rosinit('192.168.0.250'); % Replace 'ip_of_ur3_robot' with the IP address of your UR3 robot
+
+% Create a ROS publisher for joint trajectory commands
+[velPub, velMsg] = rospublisher('/joint_group_vel_controller/command', 'trajectory_msgs/JointTrajectory');
 
 % Create a pipeline object to manage streaming
 pipeline = realsense.pipeline();
@@ -42,42 +56,12 @@ if isempty(color_frame)
 end
 
 % Convert the color frame to MATLAB image
-% Process color frame and track selected points
 img = color_frame.get_data();
 img = permute(reshape(img', [3, color_frame.get_width(), color_frame.get_height()]), [3, 2, 1]);
 img = im2uint8(img);
 
-% Update tracking and calculate real-time displacement
-if pointsInitialized
-    % Track the points and update displacement
-    [trackedPoints, validity] = pointTracker(img);
-    
-    if sum(validity) >= size(userSelectedPoints, 1)
-        % Calculate real-time displacement here
-        oldPointsValid = userSelectedPoints(validity, :);
-        newPointsValid = trackedPoints(validity, :);
-        currentCentroid = mean(newPointsValid, 1);
-        displacement = currentCentroid - selectedCentroid;
-        
-        % Update global moveX, moveY, moveZ
-        
-        moveX = displacement(1); % Right (+), Left (-)
-        moveY = -displacement(2); % Up (+), Down (-)
-        
-        % Approximate Z-direction based on scale change if applicable
-        initialDistances = pdist2(userSelectedPoints, selectedCentroid);
-        currentDistances = pdist2(newPointsValid, currentCentroid);
-        scaleChange = mean(currentDistances) / mean(initialDistances);
-        moveZ = scaleChange - 1;
-        
-        % Update userSelectedPoints for tracking
-        userSelectedPoints = newPointsValid;
-        setPoints(pointTracker, userSelectedPoints);
-    end
-end
-
 % Set up the figure and layout
-hFigure = figure('Name', 'Visual Servoing with Intel RealSense D435', 'NumberTitle', 'off', 'MenuBar', 'none');
+hFigure = figure('Name', 'Visual Servoing with Intel RealSense D455', 'NumberTitle', 'off', 'MenuBar', 'none');
 
 % Create a panel for the camera output
 cameraPanel = uipanel('Parent', hFigure, 'Units', 'normalized', 'Position', [0 0 0.75 1]);
@@ -110,17 +94,13 @@ btn3Corners = uicontrol('Parent', controlPanel, 'Style', 'pushbutton', 'String',
 btn4Corners = uicontrol('Parent', controlPanel, 'Style', 'pushbutton', 'String', 'Select (Square)', ...
     'Units', 'normalized', 'Position', [0.1 0.65 0.8 0.1], 'Callback', @btn4CornersCallback, 'FontSize', 12);
 
-% Button to show simulation
-btnSimulation = uicontrol('Parent', controlPanel, 'Style', 'pushbutton', 'String', 'Open UR3 Simulation', ...
-    'Units', 'normalized', 'Position', [0.1 0.5 0.8 0.1], 'Callback', @btnSimulationCallback, 'FontSize', 12);
-
 % Button to Exit Selection Mode
 btnExitSelection = uicontrol('Parent', controlPanel, 'Style', 'pushbutton', 'String', 'Exit Selection Mode', ...
-    'Units', 'normalized', 'Position', [0.1 0.35 0.8 0.1], 'Callback', @btnExitSelectionCallback, 'FontSize', 12);
+    'Units', 'normalized', 'Position', [0.1 0.5 0.8 0.1], 'Callback', @btnExitSelectionCallback, 'FontSize', 12);
 
 % Button to Exit Program
 btnExitProgram = uicontrol('Parent', controlPanel, 'Style', 'pushbutton', 'String', 'Exit Program', ...
-    'Units', 'normalized', 'Position', [0.1 0.2 0.8 0.1], 'Callback', @btnExitProgramCallback, 'FontSize', 12);
+    'Units', 'normalized', 'Position', [0.1 0.35 0.8 0.1], 'Callback', @btnExitProgramCallback, 'FontSize', 12);
 
 % --- Main Loop ---
 try
@@ -171,6 +151,9 @@ try
                 % Approximate Z-direction movement based on scale change
                 moveZ = scaleChange - 1; % Forward (-), Backward (+)
 
+                % Update UR3 position
+                updateUR3Position();
+
                 % Display movement direction
                 imshow(img, 'Parent', cameraAxes);
                 hold(cameraAxes, 'on');
@@ -206,6 +189,7 @@ end
 % Clean up
 pipeline.stop();
 close all;
+rosshutdown;
 
 % --- Callback Functions ---
 
@@ -243,85 +227,6 @@ function btn4CornersCallback(~, ~)
     pointsInitialized = true;
 end
 
-% Callback for Open UR3 Simulation Button
-function btnSimulationCallback(~, ~)
-    global ur3Robot ur3Axes positionData selectedCentroid moveX moveY moveZ
-
-    % Create a new figure for the UR3 simulation
-    simFigure = figure('Name', 'UR3 Simulation', 'NumberTitle', 'off', 'MenuBar', 'none', 'Position', [100, 100, 800, 600]);
-    
-    % Set up axes for UR3 simulation
-    ur3Axes = axes('Parent', simFigure, 'Units', 'normalized', 'Position', [0.05, 0.05, 0.9, 0.9]);
-    hold(ur3Axes, 'on');
-    axis(ur3Axes, [-1 1 -1 1 0 1]);
-    xlabel(ur3Axes, 'X');
-    ylabel(ur3Axes, 'Y');
-    zlabel(ur3Axes, 'Z');
-    grid(ur3Axes, 'on');
-    view(ur3Axes, 3);
-
-    % Initialize UR3 robot in this environment
-    ur3Robot = UR3(transl(0, 0, 0.75)); % Adjust initial base position as needed
-
-    % Plot the UR3 robot in the current axes
-    axes(ur3Axes);  % Set the created axes as the active axes
-    ur3Robot.model.plot(zeros(1, 6), 'workspace', [-1 1 -1 1 0 1]);
-
-    % Initialize the initial joint positions (positionData) to zeros
-    positionData = zeros(1, ur3Robot.model.n);
-
-    % Create a timer to update the robot position based on camera movement
-    updateTimer = timer('ExecutionMode', 'fixedRate', 'Period', 0.05, 'TimerFcn', @(~, ~) updateUR3Position());
-
-    
-    % Start the timer
-    start(updateTimer);
-
-    % Nested function to handle UR3 position update based on camera displacement
-    function updateUR3Position()
-    positionData
-
-    % Return if no displacement values available
-    if isempty(moveX) || isempty(moveY) || isempty(moveZ)
-        return;
-    end
-
-    % Set control gain for smooth movement
-    gain = 0.001;
-    desiredVelocity = gain * [moveX; moveY; moveZ; 0; 0; 0]; % Only translational velocity
-
-    % Calculate the Jacobian in the current configuration
-    J = ur3Robot.model.jacobe(positionData);
-
-    % Compute joint velocities
-    jointVelocities = J' * desiredVelocity;
-
-    % Integrate joint positions with the computed velocities
-    dt = 0.1; % Adjust time step
-    newJointPositions = positionData + jointVelocities' * dt;
-
-    % Animate UR3 with updated joint positions
-    ur3Robot.model.animate(newJointPositions);
-
-    % Update current position data
-    positionData = newJointPositions;
-end
-
-
-
-    % Clean up timer when the figure is closed
-    set(simFigure, 'CloseRequestFcn', @(src, ~) closeSimulation(src, updateTimer));
-end
-
-% Function to stop and delete the timer on figure close
-function closeSimulation(figHandle, timerHandle)
-    stop(timerHandle);
-    delete(timerHandle);
-    delete(figHandle);
-end
-
-
-
 % Callback for Exit Selection Mode Button
 function btnExitSelectionCallback(~, ~)
     global pointsInitialized
@@ -347,4 +252,62 @@ function [x, y] = getPointsFromDetectedCorners(img, numPoints, cameraAxes)
     hold(cameraAxes, 'off');
     drawnow;
     [x, y] = ginput(numPoints);
+end
+
+% Function to update UR3 position
+function updateUR3Position()
+    global moveX moveY moveZ velPub velMsg
+
+    % Safety limits
+    maxLinearVelocity = 0.1; % meters per second
+    maxAngularVelocity = 0.5; % radians per second
+
+    % Convert pixel displacement to meters (calibration needed)
+    % For demonstration, assume a scaling factor (needs calibration)
+    pixelToMeter = 0.0005; % meters per pixel (example value)
+
+    % Compute desired end-effector velocities
+    vx = moveX * pixelToMeter;
+    vy = moveY * pixelToMeter;
+    vz = moveZ * 0.05; % Scale for Z movement
+
+    % Limit velocities to safety limits
+    vx = max(min(vx, maxLinearVelocity), -maxLinearVelocity);
+    vy = max(min(vy, maxLinearVelocity), -maxLinearVelocity);
+    vz = max(min(vz, maxLinearVelocity), -maxLinearVelocity);
+
+    % Construct twist message (velocity command)
+    cmdVel = [vx; vy; vz; 0; 0; 0]; % No rotational velocities
+
+    % Convert to joint velocities using inverse Jacobian
+    % For real robot, you might need to use a service or action to send velocities
+    % Alternatively, use position control by integrating velocities to positions
+
+    % Example of sending joint velocities (simplified)
+    % Get current joint states
+    jointStates = rossubscriber('/joint_states');
+    pause(0.1); % Wait for message
+    currentJointState = receive(jointStates);
+    currentPositions = currentJointState.Position;
+
+    % Compute Jacobian at current joint positions
+    robot = loadrobot('universalUR3', 'DataFormat', 'column');
+    jacobian = geometricJacobian(robot, currentPositions, 'tool0');
+
+    % Compute joint velocities
+    jointVelocities = pinv(jacobian) * cmdVel;
+
+    % Limit joint velocities
+    maxJointVelocity = 1.0; % radians per second
+    jointVelocities = max(min(jointVelocities, maxJointVelocity), -maxJointVelocity);
+
+    % Create and send the joint trajectory message
+    velMsg = rosmessage(velPub);
+    velMsg.JointNames = currentJointState.Name;
+    point = rosmessage('trajectory_msgs/JointTrajectoryPoint');
+    point.Velocities = jointVelocities;
+    point.TimeFromStart = rosduration(0.1); % Duration of the command
+    velMsg.Points = point;
+
+    send(velPub, velMsg);
 end

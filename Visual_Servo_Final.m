@@ -186,7 +186,7 @@ try
             % Plot blue circles for detected corners
             strongestCorners = corners.selectStrongest(200);
             cornerCoords = strongestCorners.Location;
-            plot(cameraAxes, cornerCoords(:,1), cornerCoords(:,2), 'o', 'Color', 'blue');
+            plot(cameraAxes, cornerCoords(:,1), cornerCoords(:,2), 'o', 'Color', 'blue', MarkerSize=12, LineWidth=2);
             hold(cameraAxes, 'off');
             drawnow;
         end
@@ -266,7 +266,7 @@ function [x, y] = getPointsFromDetectedCorners(img, numPoints, cameraAxes)
     % Plot blue circles for detected corners
     strongestCorners = corners.selectStrongest(200);
     cornerCoords = strongestCorners.Location;
-    plot(cameraAxes, cornerCoords(:,1), cornerCoords(:,2), 'o', 'Color', 'blue');
+    plot(cameraAxes, cornerCoords(:,1), cornerCoords(:,2), 'o', 'Color', 'blue', MarkerSize=12, LineWidth=2);
     hold(cameraAxes, 'off');
     drawnow;
 
