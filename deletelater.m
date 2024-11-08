@@ -1,61 +1,25 @@
 % Clear workspace and command window
 clear; clc;
 
+
 % Declare global variables
 global img pointTracker pointsInitialized userSelectedPoints selectionMode cameraAxes selectedCentroid
 
-% Initialize useWebcam flag
-useWebcam = false;
+% Create a pipeline object to manage streaming
+pipeline = realsense.pipeline();
 
-% Try to initialize the D435 camera
-try
-    % Create a pipeline object to manage streaming
-    pipeline = realsense.pipeline();
+% Configure the pipeline to stream color frames
+config = realsense.config();
+config.enable_stream(realsense.stream.color, 640, 480, realsense.format.rgb8, 30);
 
-    % Configure the pipeline to stream color frames
-    config = realsense.config();
-    config.enable_stream(realsense.stream.color, 640, 480, realsense.format.rgb8, 30);
+% Start streaming
+profile = pipeline.start(config);
 
-    % Start streaming
-    profile = pipeline.start(config);
-
-    % Get device information (optional)
-    device = profile.get_device();
-    name = device.get_info(realsense.camera_info.name);
-    serial = device.get_info(realsense.camera_info.serial_number);
-    disp(['Connected to: ' name ' ' serial]);
-
-    % Initialize 'img' by capturing an initial frame
-    frames = pipeline.wait_for_frames();
-    color_frame = frames.get_color_frame();
-
-    % Check if frame is valid
-    if isempty(color_frame)
-        error('No frames received from the camera.');
-    end
-
-    % Convert the color frame to MATLAB image
-    img = color_frame.get_data();
-    img = permute(reshape(img', [3, color_frame.get_width(), color_frame.get_height()]), [3, 2, 1]);
-    img = im2uint8(img);
-
-catch
-    % If any error occurs, assume D435 is not connected
-    disp('Intel D435 camera not connected. Using laptop webcam instead.');
-    useWebcam = true;
-
-    % Initialize webcam
-    cam = webcam();
-
-    % Capture initial frame
-    img = snapshot(cam);
-
-    % Ensure image is in uint8 format
-    img = im2uint8(img);
-
-    % Optionally, resize the image to match the size used with D435
-    img = imresize(img, [480, 640]);
-end
+% Get device information (optional)
+device = profile.get_device();
+name = device.get_info(realsense.camera_info.name);
+serial = device.get_info(realsense.camera_info.serial_number);
+disp(['Connected to: ' name ' ' serial]);
 
 % Load camera parameters from calibration 'cameraParams.mat'
 try
@@ -68,8 +32,22 @@ catch
         'cameraParams.mat exists and contains the variable ''cameraParams''.']);
 end
 
+% Initialize 'img' by capturing an initial frame
+frames = pipeline.wait_for_frames();
+color_frame = frames.get_color_frame();
+
+% Check if frame is valid
+if isempty(color_frame)
+    error('No frames received from the camera.');
+end
+
+% Convert the color frame to MATLAB image
+img = color_frame.get_data();
+img = permute(reshape(img', [3, color_frame.get_width(), color_frame.get_height()]), [3, 2, 1]);
+img = im2uint8(img);
+
 % Set up the figure and layout
-hFigure = figure('Name', 'Visual Servoing', 'NumberTitle', 'off', 'MenuBar', 'none');
+hFigure = figure('Name', 'Visual Servoing with Intel RealSense D435', 'NumberTitle', 'off', 'MenuBar', 'none');
 
 % Create a panel for the camera output
 cameraPanel = uipanel('Parent', hFigure, 'Units', 'normalized', 'Position', [0 0 0.75 1]);
@@ -118,27 +96,19 @@ btnExitProgram = uicontrol('Parent', controlPanel, 'Style', 'pushbutton', 'Strin
 
 try
     while ishandle(hFigure)
-        if useWebcam
-            % Capture frame from webcam
-            img = snapshot(cam);
-            img = im2uint8(img);
-            % Resize if necessary
-            img = imresize(img, [480, 640]);
-        else
-            % Wait for the next set of frames (color frame)
-            frames = pipeline.wait_for_frames();
-            color_frame = frames.get_color_frame();
+        % Wait for the next set of frames (color frame)
+        frames = pipeline.wait_for_frames();
+        color_frame = frames.get_color_frame();
 
-            % If no frame is available, continue
-            if isempty(color_frame)
-                continue;
-            end
-
-            % Convert the color frame to MATLAB image
-            img = color_frame.get_data();
-            img = permute(reshape(img', [3, color_frame.get_width(), color_frame.get_height()]), [3, 2, 1]);
-            img = im2uint8(img);
+        % If no frame is available, continue
+        if isempty(color_frame)
+            continue;
         end
+
+        % Convert the color frame to MATLAB image
+        img = color_frame.get_data();
+        img = permute(reshape(img', [3, color_frame.get_width(), color_frame.get_height()]), [3, 2, 1]);
+        img = im2uint8(img);
 
         % Convert to grayscale
         grayImage = im2gray(img);
@@ -180,40 +150,6 @@ try
                     ['Move Z: ' num2str(moveZ, '%.2f') ' (Forward-, Backward+)']
                 };
 
-                % --- Added Code to Print Movement Commands ---
-                % Define thresholds to prevent small displacements from triggering movement
-                thresholdX = 2;     % pixels
-                thresholdY = 2;     % pixels
-                thresholdZ = 0.05;  % scale change
-
-                % Determine movement commands based on moveX
-                if moveX > thresholdX
-                    disp('Command: Move Right');
-                elseif moveX < -thresholdX
-                    disp('Command: Move Left');
-                else
-                    disp('Command: No movement in X');
-                end
-
-                % Determine movement commands based on moveY
-                if moveY > thresholdY
-                    disp('Command: Move Up');
-                elseif moveY < -thresholdY
-                    disp('Command: Move Down');
-                else
-                    disp('Command: No movement in Y');
-                end
-
-                % Determine movement commands based on moveZ
-                if moveZ > thresholdZ
-                    disp('Command: Move Backward');
-                elseif moveZ < -thresholdZ
-                    disp('Command: Move Forward');
-                else
-                    disp('Command: No movement in Z');
-                end
-                % --- End of Added Code ---
-
                 % Display results
                 imshow(img, 'Parent', cameraAxes);
                 hold(cameraAxes, 'on');
@@ -250,26 +186,17 @@ try
             % Plot blue circles for detected corners
             strongestCorners = corners.selectStrongest(200);
             cornerCoords = strongestCorners.Location;
-            plot(cameraAxes, cornerCoords(:,1), cornerCoords(:,2), 'o', 'Color', 'blue', 'MarkerSize', 12, 'LineWidth', 2);
+            plot(cameraAxes, cornerCoords(:,1), cornerCoords(:,2), 'o', 'Color', 'blue', MarkerSize=12, LineWidth=2);
             hold(cameraAxes, 'off');
             drawnow;
         end
     end
 catch ME
     disp(['Error: ' ME.message]);
-    if useWebcam
-        clear cam;
-    else
-        pipeline.stop();
-    end
 end
 
 % Clean up
-if useWebcam
-    clear cam;
-else
-    pipeline.stop();
-end
+pipeline.stop();
 close all;
 
 % --- Callback Functions ---
@@ -339,7 +266,7 @@ function [x, y] = getPointsFromDetectedCorners(img, numPoints, cameraAxes)
     % Plot blue circles for detected corners
     strongestCorners = corners.selectStrongest(200);
     cornerCoords = strongestCorners.Location;
-    plot(cameraAxes, cornerCoords(:,1), cornerCoords(:,2), 'o', 'Color', 'blue', 'MarkerSize', 12, 'LineWidth', 2);
+    plot(cameraAxes, cornerCoords(:,1), cornerCoords(:,2), 'o', 'Color', 'blue', MarkerSize=12, LineWidth=2);
     hold(cameraAxes, 'off');
     drawnow;
 
