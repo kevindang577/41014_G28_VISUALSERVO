@@ -1,4 +1,4 @@
-% Clear workspace and command window
+%  Clear workspace and command window
 clear; clc;
 
 % Declare global variables
@@ -41,7 +41,7 @@ try
 
 catch
     % If any error occurs, assume D435 is not connected
-    disp('Intel D435 camera not connected. Using laptop webcam instead.');
+    disp('Intel D435 camera not connected. Initialising first available webcam.');
     useWebcam = true;
 
     % Initialize webcam
